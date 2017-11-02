@@ -9,7 +9,7 @@ import (
 )
 
 func main() {
-	err := beat.Run("mysqlbeat", "", beater.New())
+	err := beat.Run("mysqlbeat", "", beater.New)
 	if err != nil {
 		os.Exit(1)
 	}

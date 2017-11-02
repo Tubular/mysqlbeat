@@ -1,10 +1,7 @@
 /.idea
-/vendor
 /build
 
 .DS_Store
 /mysqlbeat
 /mysqlbeat.test
 *.pyc
-
-dev-tools/packer/build/*

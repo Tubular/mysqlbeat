@@ -3,19 +3,27 @@
 
 package config
 
+import "time"
+
 type Config struct {
-	Mysqlbeat MysqlbeatConfig
+	Period            time.Duration `config:"period"`
+	Hostname          string        `config:"hostname"`
+	Port              string        `config:"port"`
+	Username          string        `config:"username"`
+	Password          string        `config:"password"`
+	EncryptedPassword string        `config:"encryptedpassword"`
+	Queries           []string      `config:"queries"`
+	QueryTypes        []string      `config:"querytypes"`
+	DeltaWildcard     string        `config:"deltawildcard"`
+	DeltaKeyWildcard  string        `config:"deltakeywildcard"`
 }
 
-type MysqlbeatConfig struct {
-	Period            string   `yaml:"period"`
-	Hostname          string   `yaml:"hostname"`
-	Port              string   `yaml:"port"`
-	Username          string   `yaml:"username"`
-	Password          string   `yaml:"password"`
-	EncryptedPassword string   `yaml:"encryptedpassword"`
-	Queries           []string `yaml:"queries"`
-	QueryTypes        []string `yaml:"querytypes"`
-	DeltaWildcard     string   `yaml:"deltawildcard"`
-	DeltaKeyWildcard  string   `yaml:"deltakeywildcard"`
+var DefaultConfig = Config{
+	Period:           10 * time.Second,
+	Hostname:         "127.0.0.1",
+	Port:             "3306",
+	Username:         "mysqlbeat_user",
+	Password:         "mysqlbeat_pass",
+	DeltaWildcard:    "__DELTA",
+	DeltaKeyWildcard: "__DELTAKEY",
 }

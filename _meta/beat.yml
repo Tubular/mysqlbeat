@@ -1,0 +1,7 @@
+################### Mysqlbeat Configuration Example #########################
+
+############################# Mysqlbeat ######################################
+
+mysqlbeat:
+  # Defines how often an event is sent to the output
+  period: 1s
