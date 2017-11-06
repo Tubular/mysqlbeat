@@ -4,4 +4,12 @@
 
 mysqlbeat:
   # Defines how often an event is sent to the output
-  period: 1s
+  period: 1m
+  servers:
+    locahost:
+      hostname: "127.0.0.1"
+      port: "3306"
+      username: root
+      queries:
+        - query: "SELECT TABLE_SCHEMA as `table.database`, TABLE_NAME as `table.name`, LOWER(ENGINE) as `table.engine`, TABLE_ROWS as `table.rows`  FROM information_schema.TABLES where TABLE_TYPE = 'BASE TABLE' and TABLE_SCHEMA not in ('mysql', 'performance_schema')"
+          type: multiple-rows
