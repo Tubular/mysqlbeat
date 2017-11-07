@@ -12,9 +12,9 @@ import (
 	"time"
 
 	"github.com/elastic/beats/libbeat/beat"
-	"github.com/elastic/beats/libbeat/cfgfile"
 	"github.com/elastic/beats/libbeat/common"
 	"github.com/elastic/beats/libbeat/logp"
+	"github.com/elastic/beats/libbeat/publisher"
 
 	"github.com/adibendahan/mysqlbeat/config"
 
@@ -22,11 +22,7 @@ import (
 	_ "github.com/go-sql-driver/mysql"
 )
 
-// Mysqlbeat is a struct to hold the beat config & info
 type Mysqlbeat struct {
-	beatConfig       *config.Config
-	done             chan struct{}
-	period           time.Duration
 	hostname         string
 	port             string
 	username         string
@@ -39,6 +35,10 @@ type Mysqlbeat struct {
 
 	oldValues    common.MapStr
 	oldValuesAge common.MapStr
+
+	done   chan struct{}
+	config config.Config
+	client publisher.Client
 }
 
 var (
@@ -51,15 +51,6 @@ const (
 	// you can encrypt your password with github.com/adibendahan/mysqlbeat-password-encrypter just update your secret
 	// (and commonIV if you choose to change it) and compile.
 	secret = "github.com/adibendahan/mysqlbeat"
-
-	// default values
-	defaultPeriod           = "10s"
-	defaultHostname         = "127.0.0.1"
-	defaultPort             = "3306"
-	defaultUsername         = "mysqlbeat_user"
-	defaultPassword         = "mysqlbeat_pass"
-	defaultDeltaWildcard    = "__DELTA"
-	defaultDeltaKeyWildcard = "__DELTAKEY"
 
 	// query types values
 	queryTypeSingleRow    = "single-row"
@@ -76,99 +67,34 @@ const (
 	columnTypeFloat
 )
 
-// New Creates beater
-func New() *Mysqlbeat {
-	return &Mysqlbeat{
-		done: make(chan struct{}),
-	}
-}
-
-///*** Beater interface methods ***///
-
-// Config is a function to read config file
-func (bt *Mysqlbeat) Config(b *beat.Beat) error {
-
-	// Load beater beatConfig
-	err := cfgfile.Read(&bt.beatConfig, "")
-	if err != nil {
-		return fmt.Errorf("Error reading config file: %v", err)
+// Creates beater
+func New(b *beat.Beat, cfg *common.Config) (beat.Beater, error) {
+	config := config.DefaultConfig
+	if err := cfg.Unpack(&config); err != nil {
+		return nil, fmt.Errorf("Error reading config file: %v", err)
 	}
 
-	return nil
-}
-
-// Setup is a function to setup all beat config & info into the beat struct
-func (bt *Mysqlbeat) Setup(b *beat.Beat) error {
-
-	if len(bt.beatConfig.Mysqlbeat.Queries) < 1 {
-		err := fmt.Errorf("there are no queries to execute")
-		return err
-	}
-
-	if len(bt.beatConfig.Mysqlbeat.Queries) != len(bt.beatConfig.Mysqlbeat.QueryTypes) {
-		err := fmt.Errorf("error on config file, queries array length != queryTypes array length (each query should have a corresponding type on the same index)")
-		return err
-	}
-
-	// Setting defaults for missing config
-	if bt.beatConfig.Mysqlbeat.Period == "" {
-		logp.Info("Period not selected, proceeding with '%v' as default", defaultPeriod)
-		bt.beatConfig.Mysqlbeat.Period = defaultPeriod
-	}
-
-	if bt.beatConfig.Mysqlbeat.Hostname == "" {
-		logp.Info("Hostname not selected, proceeding with '%v' as default", defaultHostname)
-		bt.beatConfig.Mysqlbeat.Hostname = defaultHostname
-	}
-
-	if bt.beatConfig.Mysqlbeat.Port == "" {
-		logp.Info("Port not selected, proceeding with '%v' as default", defaultPort)
-		bt.beatConfig.Mysqlbeat.Port = defaultPort
-	}
-
-	if bt.beatConfig.Mysqlbeat.Username == "" {
-		logp.Info("Username not selected, proceeding with '%v' as default", defaultUsername)
-		bt.beatConfig.Mysqlbeat.Username = defaultUsername
-	}
-
-	if bt.beatConfig.Mysqlbeat.Password == "" && bt.beatConfig.Mysqlbeat.EncryptedPassword == "" {
-		logp.Info("Password not selected, proceeding with default password")
-		bt.beatConfig.Mysqlbeat.Password = defaultPassword
-	}
-
-	if bt.beatConfig.Mysqlbeat.DeltaWildcard == "" {
-		logp.Info("DeltaWildcard not selected, proceeding with '%v' as default", defaultDeltaWildcard)
-		bt.beatConfig.Mysqlbeat.DeltaWildcard = defaultDeltaWildcard
-	}
-
-	if bt.beatConfig.Mysqlbeat.DeltaKeyWildcard == "" {
-		logp.Info("DeltaKeyWildcard not selected, proceeding with '%v' as default", defaultDeltaKeyWildcard)
-		bt.beatConfig.Mysqlbeat.DeltaKeyWildcard = defaultDeltaKeyWildcard
-	}
-
-	// Parse the Period string
-	var durationParseError error
-	bt.period, durationParseError = time.ParseDuration(bt.beatConfig.Mysqlbeat.Period)
-	if durationParseError != nil {
-		return durationParseError
+	bt := &Mysqlbeat{
+		done:   make(chan struct{}),
+		config: config,
 	}
 
 	// Handle password decryption and save in the bt
-	if bt.beatConfig.Mysqlbeat.Password != "" {
-		bt.password = bt.beatConfig.Mysqlbeat.Password
-	} else if bt.beatConfig.Mysqlbeat.EncryptedPassword != "" {
+	if bt.config.EncryptedPassword != "" {
 		aesCipher, err := aes.NewCipher([]byte(secret))
 		if err != nil {
-			return err
+			return nil, err
 		}
 		cfbDecrypter := cipher.NewCFBDecrypter(aesCipher, commonIV)
-		chiperText, err := hex.DecodeString(bt.beatConfig.Mysqlbeat.EncryptedPassword)
+		chiperText, err := hex.DecodeString(bt.config.EncryptedPassword)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		plaintextCopy := make([]byte, len(chiperText))
 		cfbDecrypter.XORKeyStream(plaintextCopy, chiperText)
 		bt.password = string(plaintextCopy)
+	} else {
+		bt.password = bt.config.Password
 	}
 
 	// init the oldValues and oldValuesAge array
@@ -176,13 +102,13 @@ func (bt *Mysqlbeat) Setup(b *beat.Beat) error {
 	bt.oldValuesAge = common.MapStr{"mysqlbeat": "init"}
 
 	// Save config values to the bt
-	bt.hostname = bt.beatConfig.Mysqlbeat.Hostname
-	bt.port = bt.beatConfig.Mysqlbeat.Port
-	bt.username = bt.beatConfig.Mysqlbeat.Username
-	bt.queries = bt.beatConfig.Mysqlbeat.Queries
-	bt.queryTypes = bt.beatConfig.Mysqlbeat.QueryTypes
-	bt.deltaWildcard = bt.beatConfig.Mysqlbeat.DeltaWildcard
-	bt.deltaKeyWildcard = bt.beatConfig.Mysqlbeat.DeltaKeyWildcard
+	bt.hostname = bt.config.Hostname
+	bt.port = bt.config.Port
+	bt.username = bt.config.Username
+	bt.queries = bt.config.Queries
+	bt.queryTypes = bt.config.QueryTypes
+	bt.deltaWildcard = bt.config.DeltaWildcard
+	bt.deltaKeyWildcard = bt.config.DeltaKeyWildcard
 
 	safeQueries := true
 
@@ -200,17 +126,17 @@ func (bt *Mysqlbeat) Setup(b *beat.Beat) error {
 
 	if !safeQueries {
 		err := fmt.Errorf("Only SELECT/SHOW queries are allowed (the char ; is forbidden)")
-		return err
+		return nil, err
 	}
 
-	return nil
+	return bt, nil
 }
 
-// Run is a functions that runs the beat
 func (bt *Mysqlbeat) Run(b *beat.Beat) error {
 	logp.Info("mysqlbeat is running! Hit CTRL-C to stop it.")
 
-	ticker := time.NewTicker(bt.period)
+	bt.client = b.Publisher.Connect()
+	ticker := time.NewTicker(bt.config.Period)
 	for {
 		select {
 		case <-bt.done:
@@ -225,13 +151,8 @@ func (bt *Mysqlbeat) Run(b *beat.Beat) error {
 	}
 }
 
-// Cleanup is a function that does nothing on this beat :)
-func (bt *Mysqlbeat) Cleanup(b *beat.Beat) error {
-	return nil
-}
-
-// Stop is a function that runs once the beat is stopped
 func (bt *Mysqlbeat) Stop() {
+	bt.client.Close()
 	close(bt.done)
 }
 
@@ -286,7 +207,7 @@ LoopQueries:
 				if err != nil {
 					logp.Err("Query #%v error generating event from rows: %v", index+1, err)
 				} else if event != nil {
-					b.Events.PublishEvent(event)
+					bt.client.PublishEvent(event)
 					logp.Info("%v event sent", bt.queryTypes[index])
 				}
 				// breaking after the first row
@@ -300,7 +221,7 @@ LoopQueries:
 					logp.Err("Query #%v error generating event from rows: %v", index+1, err)
 					break LoopRows
 				} else if event != nil {
-					b.Events.PublishEvent(event)
+					bt.client.PublishEvent(event)
 					logp.Info("%v event sent", bt.queryTypes[index])
 				}
 
@@ -323,7 +244,7 @@ LoopQueries:
 
 		// If the two-columns event has data, publish it
 		if bt.queryTypes[index] == queryTypeTwoColumns && len(twoColumnEvent) > 2 {
-			b.Events.PublishEvent(twoColumnEvent)
+			bt.client.PublishEvent(twoColumnEvent)
 			logp.Info("%v event sent", queryTypeTwoColumns)
 			twoColumnEvent = nil
 		}
