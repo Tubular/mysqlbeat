@@ -6,24 +6,28 @@ package config
 import "time"
 
 type Config struct {
-	Period            time.Duration `config:"period"`
-	Hostname          string        `config:"hostname"`
-	Port              string        `config:"port"`
-	Username          string        `config:"username"`
-	Password          string        `config:"password"`
-	EncryptedPassword string        `config:"encryptedpassword"`
-	Queries           []string      `config:"queries"`
-	QueryTypes        []string      `config:"querytypes"`
-	DeltaWildcard     string        `config:"deltawildcard"`
-	DeltaKeyWildcard  string        `config:"deltakeywildcard"`
+	Period           time.Duration      `config:"period"`
+	Servers          map[string]*Server `config:servers`
+	DeltaWildcard    string             `config:"deltawildcard"`
+	DeltaKeyWildcard string             `config:"deltakeywildcard"`
+}
+
+type Server struct {
+	Hostname          string  `config:"hostname"`
+	Port              string  `config:"port"`
+	Username          string  `config:"username"`
+	Password          string  `config:"password"`
+	EncryptedPassword string  `config:"encrypted_password"`
+	Queries           []Query `config:"queries"`
+}
+
+type Query struct {
+	QueryStr  string `config:"query"`
+	QueryType string `config:"type"`
 }
 
 var DefaultConfig = Config{
 	Period:           10 * time.Second,
-	Hostname:         "127.0.0.1",
-	Port:             "3306",
-	Username:         "mysqlbeat_user",
-	Password:         "mysqlbeat_pass",
 	DeltaWildcard:    "__DELTA",
 	DeltaKeyWildcard: "__DELTAKEY",
 }

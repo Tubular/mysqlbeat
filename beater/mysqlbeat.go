@@ -79,49 +79,42 @@ func New(b *beat.Beat, cfg *common.Config) (beat.Beater, error) {
 		config: config,
 	}
 
-	// Handle password decryption and save in the bt
-	if bt.config.EncryptedPassword != "" {
-		aesCipher, err := aes.NewCipher([]byte(secret))
-		if err != nil {
-			return nil, err
-		}
-		cfbDecrypter := cipher.NewCFBDecrypter(aesCipher, commonIV)
-		chiperText, err := hex.DecodeString(bt.config.EncryptedPassword)
-		if err != nil {
-			return nil, err
-		}
-		plaintextCopy := make([]byte, len(chiperText))
-		cfbDecrypter.XORKeyStream(plaintextCopy, chiperText)
-		bt.password = string(plaintextCopy)
-	} else {
-		bt.password = bt.config.Password
-	}
-
 	// init the oldValues and oldValuesAge array
 	bt.oldValues = common.MapStr{"mysqlbeat": "init"}
 	bt.oldValuesAge = common.MapStr{"mysqlbeat": "init"}
 
-	// Save config values to the bt
-	bt.hostname = bt.config.Hostname
-	bt.port = bt.config.Port
-	bt.username = bt.config.Username
-	bt.queries = bt.config.Queries
-	bt.queryTypes = bt.config.QueryTypes
 	bt.deltaWildcard = bt.config.DeltaWildcard
 	bt.deltaKeyWildcard = bt.config.DeltaKeyWildcard
 
 	safeQueries := true
 
-	logp.Info("Total # of queries to execute: %d", len(bt.queries))
-	for index, queryStr := range bt.queries {
-
-		strCleanQuery := strings.TrimSpace(strings.ToUpper(queryStr))
-
-		if !strings.HasPrefix(strCleanQuery, "SELECT") && !strings.HasPrefix(strCleanQuery, "SHOW") || strings.ContainsAny(strCleanQuery, ";") {
-			safeQueries = false
+	for server, server_params := range bt.config.Servers {
+		// Decrypt passwords for servers
+		if len(server_params.EncryptedPassword) > 0 {
+			aesCipher, err := aes.NewCipher([]byte(secret))
+			if err != nil {
+				return nil, err
+			}
+			cfbDecrypter := cipher.NewCFBDecrypter(aesCipher, commonIV)
+			cipherText, err := hex.DecodeString(server_params.EncryptedPassword)
+			if err != nil {
+				return nil, err
+			}
+			plainTextCopy := make([]byte, len(cipherText))
+			cfbDecrypter.XORKeyStream(plainTextCopy, cipherText)
+			bt.config.Servers[server].Password = string(plainTextCopy)
 		}
+		// Validate queries
+		for index, query := range bt.config.Servers[server].Queries {
 
-		logp.Info("Query #%d (type: %s): %s", index+1, bt.queryTypes[index], queryStr)
+			strCleanQuery := strings.TrimSpace(strings.ToUpper(query.QueryStr))
+
+			if !strings.HasPrefix(strCleanQuery, "SELECT") && !strings.HasPrefix(strCleanQuery, "SHOW") || strings.ContainsAny(strCleanQuery, ";") {
+				safeQueries = false
+			}
+
+			logp.Info("Query #%d (type: %s): %s", index+1, query.QueryType, query.QueryStr)
+		}
 	}
 
 	if !safeQueries {
@@ -144,10 +137,8 @@ func (bt *Mysqlbeat) Run(b *beat.Beat) error {
 		case <-ticker.C:
 		}
 
-		err := bt.beat(b)
-		if err != nil {
-			return err
-		}
+		bt.beat(b)
+		logp.Info("Finished tick")
 	}
 }
 
@@ -159,10 +150,27 @@ func (bt *Mysqlbeat) Stop() {
 ///*** mysqlbeat methods ***///
 
 // beat is a function that iterate over the query array, generate and publish events
-func (bt *Mysqlbeat) beat(b *beat.Beat) error {
+func (bt *Mysqlbeat) beat(b *beat.Beat) {
+	for server, _ := range bt.config.Servers {
+		logp.Info("Starting prcoessing for server %v", server)
+		err := bt.process_server(server)
+		if err != nil {
+			logp.Err("Error occured when processing %v server, got: %v", server, err)
+		} else {
+			logp.Info("Finished for server %v", server)
+		}
+	}
+}
+
+func (bt *Mysqlbeat) process_server(server_name string) error {
+	params := bt.config.Servers[server_name]
+
+	if params.Port == "" {
+		params.Port = "3306"
+	}
 
 	// Build the MySQL connection string
-	connString := fmt.Sprintf("%v:%v@tcp(%v:%v)/", bt.username, bt.password, bt.hostname, bt.port)
+	connString := fmt.Sprintf("%v:%v@tcp(%v:%v)/", params.Username, params.Password, params.Hostname, params.Port)
 
 	db, err := sql.Open("mysql", connString)
 	if err != nil {
@@ -172,12 +180,12 @@ func (bt *Mysqlbeat) beat(b *beat.Beat) error {
 
 	// Create a two-columns event for later use
 	var twoColumnEvent common.MapStr
-
+	logp.Info("Prccessing %v queries for %v server", len(params.Queries), server_name)
 LoopQueries:
-	for index, queryStr := range bt.queries {
+	for index, query := range params.Queries {
 		// Log the query run time and run the query
 		dtNow := time.Now()
-		rows, err := db.Query(queryStr)
+		rows, err := db.Query(query.QueryStr)
 		if err != nil {
 			return err
 		}
@@ -189,40 +197,43 @@ LoopQueries:
 		}
 
 		// Populate the two-columns event
-		if bt.queryTypes[index] == queryTypeTwoColumns {
+		if query.QueryType == queryTypeTwoColumns {
 			twoColumnEvent = common.MapStr{
 				"@timestamp": common.Time(dtNow),
 				"type":       queryTypeTwoColumns,
+				"hostname":   server_name,
 			}
 		}
 
 	LoopRows:
 		for rows.Next() {
 
-			switch bt.queryTypes[index] {
+			switch query.QueryType {
 			case queryTypeSingleRow, queryTypeSlaveDelay:
 				// Generate an event from the current row
-				event, err := bt.generateEventFromRow(rows, columns, bt.queryTypes[index], dtNow)
+				event, err := bt.generateEventFromRow(rows, columns, query.QueryType, dtNow)
 
 				if err != nil {
 					logp.Err("Query #%v error generating event from rows: %v", index+1, err)
 				} else if event != nil {
+					event["hostname"] = server_name
 					bt.client.PublishEvent(event)
-					logp.Info("%v event sent", bt.queryTypes[index])
+					logp.Info("%v event sent", query.QueryType)
 				}
 				// breaking after the first row
 				break LoopRows
 
 			case queryTypeMultipleRows:
 				// Generate an event from the current row
-				event, err := bt.generateEventFromRow(rows, columns, bt.queryTypes[index], dtNow)
+				event, err := bt.generateEventFromRow(rows, columns, query.QueryType, dtNow)
 
 				if err != nil {
 					logp.Err("Query #%v error generating event from rows: %v", index+1, err)
 					break LoopRows
 				} else if event != nil {
+					event["hostname"] = server_name
 					bt.client.PublishEvent(event)
-					logp.Info("%v event sent", bt.queryTypes[index])
+					logp.Info("%v event sent", query.QueryType)
 				}
 
 				// Move to the next row
@@ -243,7 +254,7 @@ LoopQueries:
 		}
 
 		// If the two-columns event has data, publish it
-		if bt.queryTypes[index] == queryTypeTwoColumns && len(twoColumnEvent) > 2 {
+		if query.QueryType == queryTypeTwoColumns && len(twoColumnEvent) > 3 {
 			bt.client.PublishEvent(twoColumnEvent)
 			logp.Info("%v event sent", queryTypeTwoColumns)
 			twoColumnEvent = nil

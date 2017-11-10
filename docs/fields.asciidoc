@@ -128,12 +128,54 @@ None
 
 
 [float]
-=== counter
+=== record_type
 
-type: long
+type: keyword
 
 required: True
 
-PLEASE UPDATE DOCUMENTATION
+Type of record
+
+
+[float]
+=== hostname
+
+type: keyword
+
+required: True
+
+Name of server, descirbed in config
+
+
+[float]
+=== table.name
+
+type: keyword
+
+Name of table
+
+
+[float]
+=== table.database
+
+type: keyword
+
+Name of database, which holds table
+
+
+[float]
+=== table.rows
+
+type: long
+
+Count of rows in table
+
+
+[float]
+=== table.engine
+
+type: keyword
+
+Type of engine for table
 
 

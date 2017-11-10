@@ -4,7 +4,24 @@
 
 mysqlbeat:
   # Defines how often an event is sent to the output
-  period: 1s
+  period: 1m
+  servers:
+    db1:
+      hostname: "127.0.0.1"
+      port: "3306"
+      username: root
+      password: root
+      queries:
+        - query: "SELECT TABLE_SCHEMA as `table.database`, TABLE_NAME as `table.name`, LOWER(ENGINE) as `table.engine`, TABLE_ROWS as `table.rows`  FROM information_schema.TABLES where TABLE_TYPE = 'BASE TABLE' and TABLE_SCHEMA not in ('mysql', 'performance_schema')"
+          type: multiple-rows
+    db2:
+      hostname: "127.0.0.1"
+      port: "3306"
+      username: root
+      encrypted_password: 3c37ef8d # password: root
+      queries:
+        - query: "SELECT TABLE_SCHEMA as `table.database`, TABLE_NAME as `table.name`, LOWER(ENGINE) as `table.engine`, TABLE_ROWS as `table.rows`  FROM information_schema.TABLES where TABLE_TYPE = 'BASE TABLE' and TABLE_SCHEMA not in ('mysql', 'performance_schema')"
+          type: multiple-rows
 
 #================================ General ======================================
 
@@ -207,6 +224,10 @@ output.elasticsearch:
   # Configure curve types for ECDHE based cipher suites
   #ssl.curve_types: []
 
+  # Configure what types of renegotiation are supported. Valid options are
+  # never, once, and freely. Default is never.
+  #ssl.renegotiation: never
+
 
 #----------------------------- Logstash output ---------------------------------
 #output.logstash:
@@ -228,6 +249,11 @@ output.elasticsearch:
   # Number of batches to be send asynchronously to logstash while processing
   # new batches.
   #pipelining: 0
+
+  # If enabled only a subset of events in a batch of events is transferred per
+  # transaction.  The number of events to be sent increases up to `bulk_max_size`
+  # if no error is encountered.
+  #slow_start: false
 
   # Optional index name. The default index name is set to name of the beat
   # in all lowercase.
@@ -270,6 +296,10 @@ output.elasticsearch:
 
   # Configure curve types for ECDHE based cipher suites
   #ssl.curve_types: []
+
+  # Configure what types of renegotiation are supported. Valid options are
+  # never, once, and freely. Default is never.
+  #ssl.renegotiation: never
 
 #------------------------------- Kafka output ----------------------------------
 #output.kafka:
@@ -406,6 +436,10 @@ output.elasticsearch:
   # Configure curve types for ECDHE based cipher suites
   #ssl.curve_types: []
 
+  # Configure what types of renegotiation are supported. Valid options are
+  # never, once, and freely. Default is never.
+  #ssl.renegotiation: never
+
 #------------------------------- Redis output ----------------------------------
 #output.redis:
   # Boolean flag to enable or disable the output module.
@@ -502,6 +536,10 @@ output.elasticsearch:
 
   # Configure curve types for ECDHE based cipher suites
   #ssl.curve_types: []
+
+  # Configure what types of renegotiation are supported. Valid options are
+  # never, once, and freely. Default is never.
+  #ssl.renegotiation: never
 
 
 #------------------------------- File output -----------------------------------
@@ -645,3 +683,6 @@ logging.files:
   # Number of rotated log files to keep. Oldest files will be deleted first.
   #keepfiles: 7
 
+  # The permissions mask to apply when rotating log files. The default value is 0600.
+  # Must be a valid Unix-style file permissions mask expressed in octal notation.
+  #permissions: 0600

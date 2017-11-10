@@ -2,8 +2,34 @@
   title: mysqlbeat
   description:
   fields:
-    - name: counter
-      type: long
+    - name: record_type
+      type: keyword
       required: true
       description: >
-        PLEASE UPDATE DOCUMENTATION
+        Type of record
+
+    - name: hostname
+      type: keyword
+      required: true
+      description: >
+        Name of server, descirbed in config
+
+    - name: table.name
+      type: keyword
+      description: >
+        Name of table
+
+    - name: table.database
+      type: keyword
+      description: >
+        Name of database, which holds table
+
+    - name: table.rows
+      type: long
+      description: >
+        Count of rows in table
+
+    - name: table.engine
+      type: keyword
+      description: >
+        Type of engine for table

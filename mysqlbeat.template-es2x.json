@@ -7,7 +7,7 @@
         }
       },
       "_meta": {
-        "version": "5.6.0"
+        "version": "5.6.5"
       },
       "date_detection": false,
       "dynamic_templates": [
@@ -45,8 +45,10 @@
             }
           }
         },
-        "counter": {
-          "type": "long"
+        "hostname": {
+          "ignore_above": 1024,
+          "index": "not_analyzed",
+          "type": "string"
         },
         "meta": {
           "properties": {
@@ -86,6 +88,33 @@
             }
           }
         },
+        "record_type": {
+          "ignore_above": 1024,
+          "index": "not_analyzed",
+          "type": "string"
+        },
+        "table": {
+          "properties": {
+            "database": {
+              "ignore_above": 1024,
+              "index": "not_analyzed",
+              "type": "string"
+            },
+            "engine": {
+              "ignore_above": 1024,
+              "index": "not_analyzed",
+              "type": "string"
+            },
+            "name": {
+              "ignore_above": 1024,
+              "index": "not_analyzed",
+              "type": "string"
+            },
+            "rows": {
+              "type": "long"
+            }
+          }
+        },
         "tags": {
           "ignore_above": 1024,
           "index": "not_analyzed",
@@ -100,3 +129,4 @@
   },
   "template": "mysqlbeat-*"
 }
+
